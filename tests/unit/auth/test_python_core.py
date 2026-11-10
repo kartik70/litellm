@@ -99,6 +99,9 @@ class RecordingHandler:
     def _record(self, name: str, payload: object = None) -> None:
         self.calls = (*self.calls, (name, payload))
 
+    def model_budgets(self) -> "RecordingHandler":
+        return self
+
     async def resolve_end_user(self, prefetch_key: bool) -> None:
         self._record("resolve_end_user", prefetch_key)
 

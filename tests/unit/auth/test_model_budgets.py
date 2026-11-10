@@ -74,7 +74,7 @@ async def _run(
 
 @pytest.mark.asyncio
 async def test_within_budget_checks_the_key_then_the_user_without_rerouting():
-    assert await _run(PythonCore().check_model_budgets, FakeRequest(SCOPE)) == (
+    assert await _run(PythonCore().model_budgets().check_key_and_user, FakeRequest(SCOPE)) == (
         ALLOWED,
         (("read", None), ("key", "gpt-4o"), ("read", None), ("user", "gpt-4o")),
     )
@@ -83,7 +83,7 @@ async def test_within_budget_checks_the_key_then_the_user_without_rerouting():
 @pytest.mark.asyncio
 async def test_over_budget_reroutes_to_the_first_fallback_within_budget_and_checks_the_user_on_it():
     request: Final = FakeRequest(SCOPE, key_over=frozenset({"gpt-4o", "gpt-4o-mini"}))
-    assert await _run(PythonCore().check_model_budgets, request) == (
+    assert await _run(PythonCore().model_budgets().check_key_and_user, request) == (
         ALLOWED,
         (
             ("read", None),
@@ -114,7 +114,7 @@ async def test_an_unreroutable_over_budget_model_is_denied_with_its_own_budget_e
     scope: ModelBudgetScope, key_over: set[str], unauthorized: set[str]
 ):
     request: Final = FakeRequest(scope, key_over=frozenset(key_over), unauthorized=frozenset(unauthorized))
-    outcome, calls = await _run(PythonCore().check_model_budgets, request)
+    outcome, calls = await _run(PythonCore().model_budgets().check_key_and_user, request)
     assert outcome == Deny(_exceeded("key", "gpt-4o"))
     assert not any(name in ("rewrite", "user") for name, _ in calls)
 
@@ -123,7 +123,7 @@ async def test_an_unreroutable_over_budget_model_is_denied_with_its_own_budget_e
 async def test_a_later_model_is_checked_after_an_earlier_one_was_rerouted():
     scope: Final = replace(SCOPE, models=("gpt-4o", "embed"))
     request: Final = FakeRequest(scope, key_over=frozenset({"gpt-4o", "embed"}))
-    outcome, calls = await _run(PythonCore().check_model_budgets, request)
+    outcome, calls = await _run(PythonCore().model_budgets().check_key_and_user, request)
     assert outcome == Deny(_exceeded("key", "embed"))
     assert calls[-2:] == (("rewrite", "gpt-4o-mini"), ("key", "embed"))
 
@@ -145,13 +145,13 @@ async def test_a_later_model_is_checked_after_an_earlier_one_was_rerouted():
     ids=["no_key_budgets", "no_user_budgets", "no_models"],
 )
 async def test_only_budgets_that_exist_are_checked(scope: ModelBudgetScope, expected_calls: tuple[Call, ...]):
-    assert await _run(PythonCore().check_model_budgets, FakeRequest(scope)) == (ALLOWED, expected_calls)
+    assert await _run(PythonCore().model_budgets().check_key_and_user, FakeRequest(scope)) == (ALLOWED, expected_calls)
 
 
 @pytest.mark.asyncio
 async def test_a_user_over_budget_is_denied_on_every_path():
     over: Final = frozenset({"gpt-4o"})
-    for check in (PythonCore().check_model_budgets, PythonCore().check_user_model_budgets):
+    for check in (PythonCore().model_budgets().check_key_and_user, PythonCore().model_budgets().check_user):
         outcome, _ = await _run(check, FakeRequest(SCOPE, user_over=over))
         assert outcome == Deny(_exceeded("user", "gpt-4o"))
 
@@ -159,7 +159,7 @@ async def test_a_user_over_budget_is_denied_on_every_path():
 @pytest.mark.asyncio
 async def test_the_user_only_check_never_reads_key_budgets():
     request: Final = FakeRequest(SCOPE, key_over=frozenset({"gpt-4o"}))
-    assert await _run(PythonCore().check_user_model_budgets, request) == (
+    assert await _run(PythonCore().model_budgets().check_user, request) == (
         ALLOWED,
         (("read", None), ("user", "gpt-4o")),
     )
@@ -206,7 +206,7 @@ class FakeTeamMemberRequest:
 
 
 async def _run_member(request: FakeTeamMemberRequest) -> tuple[Outcome, tuple[Call, ...]]:
-    outcome: Final = await PythonCore().check_team_member_model_budgets(request)
+    outcome: Final = await PythonCore().model_budgets().check_team_member(request)
     return outcome, request.calls
 
 

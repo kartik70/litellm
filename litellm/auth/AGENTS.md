@@ -4,11 +4,11 @@ This package decides who a request comes from and whether it may proceed. It hol
 
 ## The core is pure
 
-`AuthCore` in `core.py` is the interface every core implements. `PythonCore` and `RustCore` (the pyo3-backed core) both subclass it. A core method takes a host plus `RequestFacts`, `Settings` and the current time, and returns an `Outcome` (`Allow` or `Deny`). It does no IO itself, reads no globals and keeps no state between calls, so the same inputs and the same host answers always give the same outcome. The package imports only the standard library and itself.
+`AuthCore` in `core.py` is the interface every core implements. `PythonCore` and `RustCore` (the pyo3-backed core) both subclass it. `start` and `start_resolved_key` decide a key credential, and `model_budgets()` returns the `ModelBudgetCore` that decides per-model budgets for the key and user, the user alone, or a team member. Each takes a host and returns an `Outcome` (`Allow` or `Deny`). It does no IO itself, reads no globals and keeps no state between calls, so the same inputs and the same host answers always give the same outcome. The package imports only the standard library and itself.
 
 ## The host carries the IO
 
-`AuthHost`, `ModelBudgetHost` and `TeamMemberModelBudgetHost` in `host.py` list every read, write and alert a core may ask for, as typed async methods. A core is plain async code that awaits those methods, the same shape as the Rust core over its `AuthHost` trait.
+`KeyHost`, `ModelBudgetHost` and `TeamMemberModelBudgetHost` in `host.py` list every read, write and alert a core may ask for, as typed async methods. A core is plain async code that awaits those methods. Each host is the IO for one kind of check, and none inherits another. Where one check runs another, the host hands out the other host through an accessor, as `KeyHost.model_budgets()` does for the per-model budgets inside the key checks. Cores follow the same rule with `AuthCore.model_budgets()`.
 
 A host performs IO and returns data. Anything that compares, chooses or denies belongs in the core. When a decision needs data the core doesn't have, add a host method that returns that data instead of letting the host decide.
 

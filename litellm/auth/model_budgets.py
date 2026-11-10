@@ -2,8 +2,24 @@ from collections.abc import Mapping
 from typing import Final
 
 from litellm.auth.answers import FallbackTarget, ModelBudgetScope, TeamMemberModelBudgetScope
+from litellm.auth.core import ModelBudgetCore
 from litellm.auth.host import ModelBudgetHost, TeamMemberModelBudgetHost
-from litellm.auth.outcome import ModelBudgetExceeded
+from litellm.auth.outcome import Allow, Deny, ModelBudgetExceeded, Outcome, WithinModelBudgets
+
+
+class PythonModelBudgetCore(ModelBudgetCore):
+    async def check_key_and_user(self, host: ModelBudgetHost) -> Outcome:
+        return _within_model_budgets(await check_key_and_user_model_budgets(host))
+
+    async def check_user(self, host: ModelBudgetHost) -> Outcome:
+        return _within_model_budgets(await check_user_model_budgets(host))
+
+    async def check_team_member(self, host: TeamMemberModelBudgetHost) -> Outcome:
+        return _within_model_budgets(await check_team_member_model_budgets(host))
+
+
+def _within_model_budgets(exceeded: ModelBudgetExceeded | None) -> Outcome:
+    return Allow(WithinModelBudgets()) if exceeded is None else Deny(exceeded)
 
 
 async def check_key_and_user_model_budgets(host: ModelBudgetHost) -> ModelBudgetExceeded | None:

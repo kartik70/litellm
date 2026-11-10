@@ -1215,7 +1215,7 @@ async def _check_team_member_model_budget_with_fallback(
         user_api_key_cache=user_api_key_cache,
         proxy_logging_obj=proxy_logging_obj,
     )
-    match await _AUTH_CORE.check_team_member_model_budgets(host):
+    match await _AUTH_CORE.model_budgets().check_team_member(host):
         case Deny(denial=denial):
             raise denial_exception(
                 denial, token=valid_token.token, route=route, jwt_auth_enabled=False, key=valid_token
@@ -2478,7 +2478,7 @@ async def _refresh_team_fields_from_cache(
         verbose_logger.debug(e)  # moving from .warning to .debug as it spams logs when team missing from cache.
 
 
-class _BuilderHost:
+class _KeyHost:
     def __init__(
         self,
         *,
@@ -2752,7 +2752,7 @@ class _BuilderHost:
     async def alert_key_soft_budget(self) -> None:
         send_soft_budget_alert(self.key, self._proxy_logging_obj, self.owner)
 
-    def _model_budgets(self) -> _ModelBudgetHost:
+    def model_budgets(self) -> _ModelBudgetHost:
         from litellm.proxy.proxy_server import llm_router, model_max_budget_limiter
 
         return _ModelBudgetHost(
@@ -2764,21 +2764,6 @@ class _BuilderHost:
             llm_router=llm_router,
             llm_model_list=_proxy_model_list(),
         )
-
-    async def read_model_budget_scope(self) -> ModelBudgetScope:
-        return await self._model_budgets().read_model_budget_scope()
-
-    async def check_key_model_budget(self, model: str) -> ModelBudgetExceeded | None:
-        return await self._model_budgets().check_key_model_budget(model)
-
-    async def authorize_budget_fallback(self, model: str) -> bool:
-        return await self._model_budgets().authorize_budget_fallback(model)
-
-    async def rewrite_request_model(self, model: str) -> None:
-        await self._model_budgets().rewrite_request_model(model)
-
-    async def check_user_model_budget(self, model: str) -> ModelBudgetExceeded | None:
-        return await self._model_budgets().check_user_model_budget(model)
 
     async def load_key_context(self) -> None:
         await _load_team_and_project(
@@ -3190,7 +3175,7 @@ async def user_api_key_auth_builder(
                         # while the log above claims all budget checks were skipped.
                         if not skip_budget_checks:
                             await _enforce_model_budgets(
-                                _AUTH_CORE.check_user_model_budgets,
+                                _AUTH_CORE.model_budgets().check_user,
                                 _ModelBudgetHost(
                                     request=request,
                                     request_data=request_data,
@@ -3222,7 +3207,7 @@ async def user_api_key_auth_builder(
                 status_code=500,
                 detail={f"Master key must be a valid string. Current type={type(master_key)}"},
             )
-        host: Final = _BuilderHost(
+        host: Final = _KeyHost(
             request=request,
             request_data=request_data,
             token=api_key,
@@ -3358,7 +3343,7 @@ async def _team_object_or_none(
         return None
 
 
-async def _master_key_auth(host: _BuilderHost, admin_user_id: str, route: str, start_time: datetime) -> UserAPIKeyAuth:
+async def _master_key_auth(host: _KeyHost, admin_user_id: str, route: str, start_time: datetime) -> UserAPIKeyAuth:
     # A stable alias replaces the raw master key so neither the key nor its hash reaches spend logs,
     # metrics labels, audit trails or rate-limit buckets.
     master_key_auth: Final = await _return_user_api_key_auth_obj(
@@ -3385,7 +3370,7 @@ async def _master_key_auth(host: _BuilderHost, admin_user_id: str, route: str, s
 
 async def _authenticated(
     outcome: Outcome,
-    host: _BuilderHost,
+    host: _KeyHost,
     admin_user_id: str,
     route: str,
     start_time: datetime,
@@ -3401,7 +3386,7 @@ async def _authenticated(
 
 
 async def _granted(
-    grant: Grant, host: _BuilderHost, admin_user_id: str, route: str, start_time: datetime
+    grant: Grant, host: _KeyHost, admin_user_id: str, route: str, start_time: datetime
 ) -> UserAPIKeyAuth:
     match grant:
         case NoMasterKey(token=token):
@@ -3423,7 +3408,7 @@ async def _granted(
 
 
 async def _virtual_key_auth(
-    host: _BuilderHost, budget_throttle_pct: float | None, route: str, start_time: datetime
+    host: _KeyHost, budget_throttle_pct: float | None, route: str, start_time: datetime
 ) -> UserAPIKeyAuth:
     key: Final = host.key
     token: Final = key.token
@@ -4895,7 +4880,7 @@ async def _run_post_custom_auth_checks(
     valid_token.user_model_max_budget = user_budget  # rebind-ok: the spend hook reads it off this token
     if not skip_budget_checks:
         await _enforce_model_budgets(
-            _AUTH_CORE.check_model_budgets,
+            _AUTH_CORE.model_budgets().check_key_and_user,
             _ModelBudgetHost(
                 request=request,
                 request_data=request_data,
@@ -4971,7 +4956,7 @@ async def _authorize_resolved_key(
     )
 
     start_time: Final = datetime.now(timezone.utc)
-    host: Final = _BuilderHost(
+    host: Final = _KeyHost(
         request=request,
         request_data=request_data,
         token=key_hash,

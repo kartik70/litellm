@@ -4,15 +4,11 @@ from datetime import datetime
 from typing import Final
 
 from litellm.auth.answers import AdminKey, KeyFacts, TeamMember
-from litellm.auth.core import AuthCore
-from litellm.auth.host import AuthHost, ModelBudgetHost, TeamMemberModelBudgetHost
+from litellm.auth.core import AuthCore, ModelBudgetCore
+from litellm.auth.host import KeyHost
 from litellm.auth.inputs import RequestFacts, Settings
 from litellm.auth.key import hash_token, is_master_key
-from litellm.auth.model_budgets import (
-    check_key_and_user_model_budgets,
-    check_team_member_model_budgets,
-    check_user_model_budgets,
-)
+from litellm.auth.model_budgets import PythonModelBudgetCore, check_key_and_user_model_budgets
 from litellm.auth.outcome import (
     Allow,
     CachedAdminKey,
@@ -25,7 +21,6 @@ from litellm.auth.outcome import (
     MasterKey,
     MasterKeyOnlyRoute,
     MissingKey,
-    ModelBudgetExceeded,
     NoDatabase,
     NoMasterKey,
     NotAVirtualKey,
@@ -35,7 +30,6 @@ from litellm.auth.outcome import (
     UserAuthDisabled,
     UserAuthRoute,
     VirtualKey,
-    WithinModelBudgets,
 )
 
 _USER_AUTH_ROUTE: Final = "/user/auth"
@@ -56,7 +50,7 @@ class _WithinKeyBudget:
 
 
 class PythonCore(AuthCore):
-    async def start(self, host: AuthHost, facts: RequestFacts, settings: Settings, now: datetime) -> Outcome:
+    async def start(self, host: KeyHost, facts: RequestFacts, settings: Settings, now: datetime) -> Outcome:
         token: Final = facts.token
         if settings.master_key is None:
             return Allow(NoMasterKey(token=token))
@@ -73,25 +67,15 @@ class PythonCore(AuthCore):
         return await _presented_key(host, token, facts, settings, now)
 
     async def start_resolved_key(
-        self, host: AuthHost, facts: RequestFacts, settings: Settings, now: datetime
+        self, host: KeyHost, facts: RequestFacts, settings: Settings, now: datetime
     ) -> Outcome:
         return await _check_key(host, _KeyCheck(settings, now, facts.is_llm_api_route, key_label=facts.token or ""))
 
-    async def check_model_budgets(self, host: ModelBudgetHost) -> Outcome:
-        return _within_model_budgets(await check_key_and_user_model_budgets(host))
-
-    async def check_user_model_budgets(self, host: ModelBudgetHost) -> Outcome:
-        return _within_model_budgets(await check_user_model_budgets(host))
-
-    async def check_team_member_model_budgets(self, host: TeamMemberModelBudgetHost) -> Outcome:
-        return _within_model_budgets(await check_team_member_model_budgets(host))
+    def model_budgets(self) -> ModelBudgetCore:
+        return PythonModelBudgetCore()
 
 
-def _within_model_budgets(exceeded: ModelBudgetExceeded | None) -> Outcome:
-    return Allow(WithinModelBudgets()) if exceeded is None else Deny(exceeded)
-
-
-async def _presented_key(host: AuthHost, token: str, facts: RequestFacts, settings: Settings, now: datetime) -> Outcome:
+async def _presented_key(host: KeyHost, token: str, facts: RequestFacts, settings: Settings, now: datetime) -> Outcome:
     hashed_token: Final = hash_token(token)
     presented: Final = await host.resolve_presented_key(hashed_token)
     if isinstance(presented, AdminKey):
@@ -113,7 +97,7 @@ async def _presented_key(host: AuthHost, token: str, facts: RequestFacts, settin
     return await _check_key(host, _KeyCheck(settings, now, facts.is_llm_api_route, key_label=hashed_token))
 
 
-async def _check_key(host: AuthHost, check: _KeyCheck) -> Outcome:
+async def _check_key(host: KeyHost, check: _KeyCheck) -> Outcome:
     key: Final = await host.inspect_key()
     if key.blocked:
         return Deny(KeyBlocked())
@@ -135,18 +119,18 @@ async def _check_key(host: AuthHost, check: _KeyCheck) -> Outcome:
         return Deny(key_budget)
     if key.soft_budget and key.spend >= key.soft_budget:
         await host.alert_key_soft_budget()
-    model_budget_exceeded: Final = await check_key_and_user_model_budgets(host)
+    model_budget_exceeded: Final = await check_key_and_user_model_budgets(host.model_budgets())
     if model_budget_exceeded is not None:
         return Deny(model_budget_exceeded)
     return await _grant(host, check, key, budget_throttle_pct=key_budget.budget_throttle_pct)
 
 
-async def _owner_deactivated(host: AuthHost, user_id: str) -> bool:
+async def _owner_deactivated(host: KeyHost, user_id: str) -> bool:
     owner: Final = await host.load_key_owner(user_id)
     return owner is not None and owner.deactivated
 
 
-async def _check_team_member_budget(host: AuthHost, member: TeamMember) -> TeamMemberBudgetExceeded | None:
+async def _check_team_member_budget(host: KeyHost, member: TeamMember) -> TeamMemberBudgetExceeded | None:
     budget: Final = await host.read_team_member_budget(member)
     if budget is None or budget.spend < budget.max_budget:
         return None
@@ -156,7 +140,7 @@ async def _check_team_member_budget(host: AuthHost, member: TeamMember) -> TeamM
     )
 
 
-async def _check_key_budget(host: AuthHost, check: _KeyCheck, key: KeyFacts) -> _WithinKeyBudget | KeyBudgetExceeded:
+async def _check_key_budget(host: KeyHost, check: _KeyCheck, key: KeyFacts) -> _WithinKeyBudget | KeyBudgetExceeded:
     max_budget: Final = key.max_budget
     if not check.is_llm_api_route or max_budget is None:
         return _WithinKeyBudget(budget_throttle_pct=None)
@@ -170,7 +154,7 @@ async def _check_key_budget(host: AuthHost, check: _KeyCheck, key: KeyFacts) -> 
     return KeyBudgetExceeded(spend=spend, max_budget=max_budget)
 
 
-async def _grant(host: AuthHost, check: _KeyCheck, key: KeyFacts, budget_throttle_pct: float | None) -> Outcome:
+async def _grant(host: KeyHost, check: _KeyCheck, key: KeyFacts, budget_throttle_pct: float | None) -> Outcome:
     await host.load_key_context()
     if check.settings.proxy_max_budget > 0 and check.settings.has_db:
         proxy_spend: Final = await host.read_proxy_spend()

@@ -34,7 +34,7 @@ async def _check_user_model_budgets(valid_token: UserAPIKeyAuth, limiter: object
     request: Final = MagicMock()
     request.scope = {}
     await _enforce_model_budgets(
-        PythonCore().check_user_model_budgets,
+        PythonCore().model_budgets().check_user,
         _ModelBudgetHost(
             request=request,
             request_data={"model": model},
@@ -1751,7 +1751,7 @@ def test_jwt_path_enforces_the_user_model_budget_before_returning():
     tree = ast.parse(
         textwrap.dedent(inspect.getsource(auth_module._user_api_key_auth_builder))
         + "\n"
-        + textwrap.dedent(inspect.getsource(auth_module._BuilderHost))
+        + textwrap.dedent(inspect.getsource(auth_module._KeyHost))
     )
 
     def calls_before_each_return(node):
@@ -1796,7 +1796,7 @@ def test_every_jwt_branch_carries_the_user_model_budget():
     tree = ast.parse(
         textwrap.dedent(inspect.getsource(auth_module._user_api_key_auth_builder))
         + "\n"
-        + textwrap.dedent(inspect.getsource(auth_module._BuilderHost))
+        + textwrap.dedent(inspect.getsource(auth_module._KeyHost))
     )
 
     assignments = [
@@ -2075,7 +2075,7 @@ def test_mapped_key_jwt_falls_through_to_the_shared_user_budget_attach():
     tree = ast.parse(
         textwrap.dedent(inspect.getsource(auth_module._user_api_key_auth_builder))
         + "\n"
-        + textwrap.dedent(inspect.getsource(auth_module._BuilderHost))
+        + textwrap.dedent(inspect.getsource(auth_module._KeyHost))
     )
 
     # Half one: the shared block copies the user row's budget onto the token.

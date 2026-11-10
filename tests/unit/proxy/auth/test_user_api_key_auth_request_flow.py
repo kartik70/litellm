@@ -9683,7 +9683,7 @@ async def _check_key_model_budgets(
     llm_router: litellm.Router | None = None,
 ) -> None:
     await _enforce_model_budgets(
-        PythonCore().check_model_budgets,
+        PythonCore().model_budgets().check_key_and_user,
         _ModelBudgetHost(
             request=request,
             request_data=request_data,
