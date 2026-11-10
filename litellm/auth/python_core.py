@@ -5,10 +5,14 @@ from typing import Final
 
 from litellm.auth.answers import AdminKey, KeyFacts, TeamMember
 from litellm.auth.core import AuthCore, ModelBudgetCore
-from litellm.auth.host import KeyHost
+from litellm.auth.host import KeyHost, ModelBudgetHost, TeamMemberModelBudgetHost
 from litellm.auth.inputs import RequestFacts, Settings
 from litellm.auth.key import hash_token, is_master_key
-from litellm.auth.model_budgets import PythonModelBudgetCore, check_key_and_user_model_budgets
+from litellm.auth.model_budgets import (
+    check_key_and_user_model_budgets,
+    check_team_member_model_budgets,
+    check_user_model_budgets,
+)
 from litellm.auth.outcome import (
     Allow,
     CachedAdminKey,
@@ -21,6 +25,7 @@ from litellm.auth.outcome import (
     MasterKey,
     MasterKeyOnlyRoute,
     MissingKey,
+    ModelBudgetExceeded,
     NoDatabase,
     NoMasterKey,
     NotAVirtualKey,
@@ -30,6 +35,7 @@ from litellm.auth.outcome import (
     UserAuthDisabled,
     UserAuthRoute,
     VirtualKey,
+    WithinModelBudgets,
 )
 
 _USER_AUTH_ROUTE: Final = "/user/auth"
@@ -73,6 +79,21 @@ class PythonCore(AuthCore):
 
     def model_budgets(self) -> ModelBudgetCore:
         return PythonModelBudgetCore()
+
+
+class PythonModelBudgetCore(ModelBudgetCore):
+    async def check_key_and_user(self, host: ModelBudgetHost) -> Outcome:
+        return _within_model_budgets(await check_key_and_user_model_budgets(host))
+
+    async def check_user(self, host: ModelBudgetHost) -> Outcome:
+        return _within_model_budgets(await check_user_model_budgets(host))
+
+    async def check_team_member(self, host: TeamMemberModelBudgetHost) -> Outcome:
+        return _within_model_budgets(await check_team_member_model_budgets(host))
+
+
+def _within_model_budgets(exceeded: ModelBudgetExceeded | None) -> Outcome:
+    return Allow(WithinModelBudgets()) if exceeded is None else Deny(exceeded)
 
 
 async def _presented_key(host: KeyHost, token: str, facts: RequestFacts, settings: Settings, now: datetime) -> Outcome:
