@@ -516,6 +516,7 @@ jobs:
 
           - shard: proxy-auth
             test-path: |-
+              tests/unit/auth
               tests/unit/proxy/auth
               --ignore=tests/unit/proxy/auth/test_auth_checks.py
               --ignore=tests/unit/proxy/auth/test_user_api_key_auth.py
